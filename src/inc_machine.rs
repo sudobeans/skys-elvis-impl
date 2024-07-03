@@ -24,7 +24,7 @@ impl std::fmt::Display for IncMachine {
 }
 
 impl Machine for IncMachine {
-    fn start(name: String) -> Self
+    fn start() -> Self
     where
         Self: Sized {
         Self {
@@ -45,10 +45,10 @@ impl Machine for IncMachine {
 
     fn poll(&mut self, time: Time) {
         for (chan, ci) in &mut self.connections {
-            match (ci, chan.recv()) {
+            match (*ci, chan.recv()) {
                 (ConnectionInfo::WillSend(when, num), _) => {
-                    if  time >= *when {
-                        chan.send(Message::from_iter([*num]))
+                    if  time >= when {
+                        chan.send(Message::from_iter([num]))
                     }
                     *ci = ConnectionInfo::Waiting;
                 }
@@ -56,7 +56,7 @@ impl Machine for IncMachine {
                     if let Some(num) = msg.first() {
                         let new_num = num.saturating_add(1);
                         let new_time = time.checked_add(new_num as u64).expect("too much time passed");
-                        *ci = ConnectionInfo::WillSend(time, new_num)
+                        *ci = ConnectionInfo::WillSend(new_time, new_num)
                     }
                 }
                 (ConnectionInfo::Waiting, None) => {}
@@ -64,7 +64,7 @@ impl Machine for IncMachine {
         }
     }
 
-    fn poll_at(&mut self) -> Option<Time> {
+    fn poll_at(&self) -> Option<Time> {
         // Returns the nearest time in the future among all connections
         let mut min = None;
         for (_chan, ci) in self.connections.iter() {

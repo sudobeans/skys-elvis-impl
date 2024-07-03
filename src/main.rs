@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::{Duration, Instant}};
+use std::{collections::{BTreeMap, BTreeSet, BinaryHeap}, time::{Duration, Instant}};
 
 use inc_machine::IncMachine;
 use machine::{Machine, Time};
@@ -23,6 +23,7 @@ Whenever they receive a number, they increment it and send it back.
 ##############################################################################
 ";
 
+type Index = usize;
 
 enum Command {
     Help,
@@ -43,25 +44,28 @@ fn get_command() -> Result<Command, String> {
 
     let tokens = Vec::from_iter(line.split_whitespace().map(str::to_lowercase));
     let refs = Vec::from_iter(tokens.iter().map(String::as_str));
-    let result = match &*refs {
-        ["help"] => Help,
-        ["add", name] => Add(name.to_string()),
-        ["connect", name1, name2] => Connect(name1.to_string(), name2.to_string()),
-        ["step"] => Step,
+    match &*refs {
+        ["help"] => Ok(Help),
+        ["add", name] => Ok(Add(name.to_string())),
+        ["connect", name1, name2] => Ok(Connect(name1.to_string(), name2.to_string())),
+        ["step"] => Ok(Step),
         ["realtime", secs] => {
             match u64::from_str_radix(secs, 10) {
-                Ok(dur) => Realtime(Duration::from_secs(dur)),
-                Err(e) => return Err(e.to_string()),
+                Ok(dur) => Ok(Realtime(Duration::from_secs(dur))),
+                Err(e) => Err(e.to_string()),
             }
         }
-        ["quit"] => Quit,
-    };
-    Ok(result)
+        ["quit"] => Ok(Quit),
+        _ => Err("invalid command, type \"help\" to see a list of valid commands".to_string())
+    }
 }
 
 
 fn main() {
-    let events: BTreeMap<Time, Box<dyn Machine>> = BTreeMap::new();
+    // each entry represents the time a machine should be polled 
+    // and its index in the machines list
+    let mut events: BTreeSet<(Time, usize)> = BTreeSet::new();
+    let mut machines: Vec<Box<dyn Machine>> = Vec::new();
 
     // The simulation is terminal-interactive.
     // in the real sim we would probably use the NDL or something for this.
@@ -73,8 +77,17 @@ fn main() {
                 Command::Help => println!("{HELP_MSG}"),
                 Command::Add(name) => {
                     let machine = IncMachine::start(name);
+                    let time = machine.poll_at();
+
+                    machines.push(Box::new(machine));
+
+                    if let Some(t) = time {
+                        events.insert((t, machines.len()-1));
+                    }
                 },
-                Command::Connect(_, _) => todo!(),
+                Command::Connect(name1, name2) => {
+                    
+                },
                 Command::Step => todo!(),
                 Command::Realtime(_) => todo!(),
                 Command::Quit => todo!(),

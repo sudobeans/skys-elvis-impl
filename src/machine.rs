@@ -3,7 +3,7 @@ pub type Time = u64;
 
 pub trait Machine: std::fmt::Display {
     /// Creates and starts a Machine.
-    fn start(name: String) -> Self
+    fn start() -> Self
     where
         Self: Sized;
 
@@ -22,10 +22,12 @@ pub trait Machine: std::fmt::Display {
     /// such as being polled, receiving a message, or having a connection added.
     /// For example, this method could return 50 if the sim is supposed to do
     /// something at the 50th second.
-    fn poll_at(&mut self) -> Option<Time>;
+    fn poll_at(&self) -> Option<Time>;
 }
 
 use std::sync::mpsc::*;
+
+use crate::Index;
 
 pub type Message = Vec<u8>;
 
@@ -34,10 +36,10 @@ pub struct Channel {
     send: Sender<Message>,
     recv: Receiver<Message>,
 
-    /// Our name
-    us: String,
+    /// Our index
+    us: Index,
     /// other end's name
-    them: String,
+    them: Index,
 
     /// this channel is also sent on
     /// when a message is sent to indicate update
@@ -47,28 +49,29 @@ pub struct Channel {
 impl Channel {
     /// Creates 2 connected channel endpoints,
     /// and a flag for detecting when messages are received.
-    pub fn new(name1: String, name2: String) -> (Channel, Channel, Receiver<()>) {
+    pub fn new(idx1: Index, idx2: Index) -> (Channel, Channel, Receiver<()>) {
         let (s1, r1) = channel();
         let (s2, r2) = channel();
         let (updated, updated_recv) = channel();
 
         (
-            Channel { us: name1, them: name2, send: s1, recv: r2, updated: updated.clone() },
-            Channel { us: name2, them: name1, send: s2, recv: r1, updated },
+            Channel { us: idx1, them: idx2, send: s1, recv: r2, updated: updated.clone() },
+            Channel { us: idx2, them: idx1, send: s2, recv: r1, updated },
             updated_recv
         )
     }
 
-    pub fn receiver_name(&self) -> String {
-        self.them.clone()
+    pub fn receiver_name(&self) -> Index {
+        self.them
     }
 
-    pub fn sender_name(&self) -> String {
-        self.us.clone()
+    pub fn sender_name(&self) -> Index {
+        self.us
     }
 
     pub fn send(&mut self, message: Message) {
         let _ = self.send.send(message);
+        self.updated.send
     }
 
     pub fn recv(&mut self) -> Option<Message> {
