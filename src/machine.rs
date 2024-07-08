@@ -25,57 +25,18 @@ pub trait Machine: std::fmt::Display {
     fn poll_at(&self) -> Option<Time>;
 }
 
-use std::sync::mpsc::*;
+use std::{cell::RefCell, collections::VecDeque, rc::Rc, sync::mpsc::*};
 
 use crate::Index;
 
-pub type Message = Vec<u8>;
+pub type Message<'a> = &'a [u8];
+pub type Buf = Rc<RefCell<VecDeque<u8>>>;
 
-/// Two-way channel representing a connection between 2 machines.
-pub struct Channel {
-    send: Sender<Message>,
-    recv: Receiver<Message>,
-
-    /// Our index
-    us: Index,
-    /// other end's name
-    them: Index,
-
-    /// this channel is also sent on
-    /// when a message is sent to indicate update
-    updated: Sender<()>,
+pub struct Channel2 {
+    inbox: Buf,
+    outbox: Buf,
 }
 
-impl Channel {
-    /// Creates 2 connected channel endpoints,
-    /// and a flag for detecting when messages are received.
-    pub fn new(idx1: Index, idx2: Index) -> (Channel, Channel, Receiver<()>) {
-        let (s1, r1) = channel();
-        let (s2, r2) = channel();
-        let (updated, updated_recv) = channel();
-
-        (
-            Channel { us: idx1, them: idx2, send: s1, recv: r2, updated: updated.clone() },
-            Channel { us: idx2, them: idx1, send: s2, recv: r1, updated },
-            updated_recv
-        )
-    }
-
-    pub fn receiver_name(&self) -> Index {
-        self.them
-    }
-
-    pub fn sender_name(&self) -> Index {
-        self.us
-    }
-
-    pub fn send(&mut self, message: Message) {
-        let _ = self.send.send(message);
-        self.updated.send
-    }
-
-    pub fn recv(&mut self) -> Option<Message> {
-        self.recv.try_recv().ok()
-    }
+impl Channel2 {
+    
 }
-
