@@ -1,9 +1,12 @@
-use crate::machine::{Channel, Machine, Message, Time};
+use crate::{
+    util::{Channel, Machine, Time},
+    Index,
+};
 
 /// A machine that receives a number, increments it, then waits some time
 /// before sending it back.
 pub struct IncMachine {
-    connections: Vec<(Channel, ConnectionInfo)>
+    connections: Vec<(Channel, ConnectionInfo)>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -13,29 +16,30 @@ enum ConnectionInfo {
     Waiting,
 }
 
-impl std::fmt::Display for IncMachine {
+impl std::fmt::Debug for IncMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dl = f.debug_list();
         for (chan, ci) in &self.connections {
-            dl.entry(&(chan.receiver_name(), ci));
-        };
+            dl.entry(&(chan.other_index(), ci));
+        }
         dl.finish()
     }
 }
 
 impl Machine for IncMachine {
-    fn start() -> Self
+    fn start(_index: Index) -> Self
     where
-        Self: Sized {
+        Self: Sized,
+    {
         Self {
-            connections: Vec::new()
+            connections: Vec::new(),
         }
     }
 
     fn add_connection(&mut self, chan: Channel, time: Time) {
-        // We say the channel with the earliest name in the alphabet
-        // gets to send first. It's arbitrary.
-        let ci = if chan.sender_name() < chan.receiver_name() {
+        // We say the channel with the lowest index gets to send first.
+        // it's arbitrary
+        let ci = if chan.index() < chan.other_index() {
             ConnectionInfo::WillSend(time + 1, 1)
         } else {
             ConnectionInfo::Waiting
@@ -47,19 +51,20 @@ impl Machine for IncMachine {
         for (chan, ci) in &mut self.connections {
             match (*ci, chan.recv()) {
                 (ConnectionInfo::WillSend(when, num), _) => {
-                    if  time >= when {
-                        chan.send(Message::from_iter([num]))
+                    if time >= when {
+                        chan.send(&[num])
                     }
                     *ci = ConnectionInfo::Waiting;
                 }
-                (ConnectionInfo::Waiting, Some(msg)) => {
-                    if let Some(num) = msg.first() {
+                (ConnectionInfo::Waiting, msgs) => {
+                    if let Some(num) = msgs.first() {
                         let new_num = num.saturating_add(1);
-                        let new_time = time.checked_add(new_num as u64).expect("too much time passed");
+                        let new_time = time
+                            .checked_add(new_num as u64)
+                            .expect("too much time passed");
                         *ci = ConnectionInfo::WillSend(new_time, new_num)
                     }
                 }
-                (ConnectionInfo::Waiting, None) => {}
             }
         }
     }
