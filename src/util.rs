@@ -35,6 +35,8 @@ pub trait Machine: std::fmt::Debug {
 
 use std::cell::RefCell;
 
+use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
+
 use crate::Index;
 
 pub type Ref<T> = &'static RefCell<T>;
@@ -88,5 +90,70 @@ impl Channel {
     /// Returns the index associated with the other end of this channel.
     pub fn other_index(&self) -> usize {
         self.them
+    }
+}
+
+// Implementing Device trait for Channel
+impl Device for Channel {
+    // As it turns out, the Channel struct has all the information needed
+    // to be a RxToken and TxToken
+    type RxToken<'a> = Channel
+    where
+        Self: 'a;
+
+    type TxToken<'a> = Channel
+    where
+        Self: 'a;
+
+    fn receive(
+        &mut self,
+        _timestamp: smoltcp::time::Instant,
+    ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+        Some((self.clone(), self.clone()))
+    }
+
+    fn transmit(&mut self, _timestamp: smoltcp::time::Instant) -> Option<Self::TxToken<'_>> {
+        Some(self.clone())
+    }
+
+    fn capabilities(&self) -> smoltcp::phy::DeviceCapabilities {
+        use smoltcp::phy::Checksum::Both;
+        use smoltcp::phy::ChecksumCapabilities;
+
+        let mut result = DeviceCapabilities::default();
+        result.medium = Medium::Ethernet;
+        result.max_transmission_unit = 1500;
+        result.max_burst_size = None;
+        // device checks no packets,
+        // the smoltcp stack has to do it
+        result.checksum = ChecksumCapabilities::default();
+        result.checksum.ipv4 = Both;
+        result.checksum.udp = Both;
+        result.checksum.tcp = Both;
+        result.checksum.icmpv4 = Both;
+        result.checksum.icmpv6 = Both;
+        result
+    }
+}
+
+impl RxToken for Channel {
+    fn consume<R, F>(mut self, f: F) -> R
+    where
+        F: FnOnce(&mut [u8]) -> R,
+    {
+        let mut incoming = self.recv();
+        f(&mut incoming)
+    }
+}
+
+impl TxToken for Channel {
+    fn consume<R, F>(mut self, len: usize, f: F) -> R
+    where
+        F: FnOnce(&mut [u8]) -> R,
+    {
+        let mut outgoing = Vec::with_capacity(len);
+        let r = f(&mut outgoing);
+        self.send(&outgoing);
+        r
     }
 }
