@@ -6,6 +6,7 @@ use util::{take_all, Channel, Machine, Time};
 mod inc_machine;
 mod tcp_machine;
 mod util;
+mod os_traits;
 
 const HELP_MSG: &str = "\
 ##############################################################################
