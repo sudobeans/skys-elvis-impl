@@ -7,6 +7,7 @@ mod inc_machine;
 mod tcp_machine;
 mod util;
 mod os_traits;
+mod simulator;
 
 const HELP_MSG: &str = "\
 ##############################################################################
