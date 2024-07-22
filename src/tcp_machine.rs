@@ -2,9 +2,9 @@ use smoltcp::{
     iface::{Interface, SocketHandle, SocketSet}, phy::{Device, RxToken, TxToken}, socket::tcp, storage::RingBuffer, wire::{IpEndpoint, IpListenEndpoint}
 };
 
-use crate::util::{Channel, Time};
+use crate::{simulator::{Event, SIM}, util::{Callback, CallbackMut, Channel, Time}};
 
-use std::{cell::RefCell, collections::{HashMap, VecDeque}};
+use std::{cell::RefCell, collections::{HashMap, VecDeque}, sync::Arc};
 
 type Msg = Vec<u8>;
 
@@ -78,6 +78,11 @@ struct ElvOsInner {
 
 impl ElvOsInner {
 
+    /// Polls the inner smoltcp
+    fn poll(&mut self) {
+        self.interface.poll(SIM.get_instant(), &mut self.device, &mut self.sockets);
+    }
+
     /// Returns a Socket and its associated SocketData.
     /// Panics if the handle is invalid.
     fn get_sock(&mut self, sock: SocketHandle) -> (&mut tcp::Socket<'static>, &mut SocketData) {
@@ -98,7 +103,7 @@ impl ElvOsInner {
         sock.connect(self.interface.context(), remote_endpoint, local_endpoint).unwrap();
     }
 
-    fn set_connect_callback(&mut self, sock: SocketHandle, cb: impl FnMut() + 'static) {
+    fn set_connect_callback(&mut self, sock: SocketHandle, cb: impl CallbackMut) {
         let sock_data = self.get_sock(sock).1;
         sock_data.connect = Box::new(cb);
     }
@@ -108,7 +113,7 @@ impl ElvOsInner {
         sock.listen(local_endpoint);
     }
     
-    fn set_listen_callback(&mut self, sock: SocketHandle, cb: impl FnMut() + 'static) {
+    fn set_listen_callback(&mut self, sock: SocketHandle, cb: impl CallbackMut) {
         let sock_data = self.get_sock(sock).1;
         sock_data.listen = Box::new(cb);
     }
@@ -118,7 +123,7 @@ impl ElvOsInner {
         sock.send_slice(msg).or(Err(std::io::ErrorKind::NotConnected.into()))
     }
 
-    fn set_recv_callback(&mut self, sock: SocketHandle, cb: impl FnMut() + 'static) {
+    fn set_recv_callback(&mut self, sock: SocketHandle, cb: impl CallbackMut) {
         let sock_data = self.get_sock(sock).1;
         sock_data.recv = Box::new(cb);
     }
@@ -132,9 +137,13 @@ impl ElvOsInner {
         self.device.incoming.push_back(msg);
 
         // poll!
+        self.interface.poll(SIM.get_instant(), &mut self.device, &mut self.sockets);
 
+        // make sure packets were received
+        assert!(self.device.incoming.is_empty());
     }
 
+    /// Sends outgoing packets through channel
     fn outgoing_packets(&mut self) -> VecDeque<Msg> {
         
     }
@@ -166,57 +175,74 @@ impl ElvOs {
     // ElvOs is just a refcell around a ElvOsInner,
     // so all we have to do is borrow the inner to call all its methods
 
+    /// adds an event to poll the smoltcp later
+    fn add_smoltcp_poll_event(self: Arc<Self>) {
+        let self_ref = self.0.borrow();
+        let socks = &self_ref.sockets;
+        let next = self.0.borrow_mut().interface.poll_at(SIM.get_instant(), socks);
+
+        if let Some(next) = next {
+            let event_fn = || {
+                self.0.borrow_mut().poll()
+            };
+            SIM.add_event(Event::new(time, cb))
+        }
+    }
 
     /// gets SocketData and Socket object associated with handle, then calls f
-    fn with_elvos_inner(&self, f: impl FnOnce(&mut ElvOsInner)){
+    fn with_elvos_inner(self: Arc<Self>, f: impl FnOnce(&mut ElvOsInner)){
         let mut elvos_borrow = self.0.borrow_mut();
         let elvos_ref = &mut *elvos_borrow;
 
         f(elvos_ref)
     }
 
-    fn socket(&self) -> Self::SocketId {
+    fn socket(self: Arc<Self>) -> SocketHandle {
         self.0.borrow_mut().socket()
     }
     
-    fn connect(&self, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>, remote_endpoint: impl Into<IpEndpoint>) {
-        self.0.borrow_mut().connect(sock, local_endpoint, remote_endpoint)
+    fn connect(self: Arc<Self>, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>, remote_endpoint: impl Into<IpEndpoint>) {
+        self.0.borrow_mut().connect(sock, local_endpoint, remote_endpoint);
+        self.add_smoltcp_poll_event();
     }
     
-    fn set_connect_callback(&self, sock: SocketHandle, cb: impl FnMut() + 'static) {
+    fn set_connect_callback(self: Arc<Self>, sock: SocketHandle, cb: impl CallbackMut) {
         self.0.borrow_mut().set_connect_callback(sock, cb)
     }
     
-    fn listen(&self, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>) {
-        self.0.borrow_mut().listen(sock, local_endpoint)
+    fn listen(self: Arc<Self>, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>) {
+        self.0.borrow_mut().listen(sock, local_endpoint);
+        self.add_smoltcp_poll_event();
     }
     
-    fn set_listen_callback(&self, sock: SocketHandle, cb: impl FnMut() + 'static) {
+    fn set_listen_callback(self: Arc<Self>, sock: SocketHandle, cb: impl CallbackMut) {
         self.0.borrow_mut().set_listen_callback(sock, cb)
     }
     
-    fn send(&self, sock: Self::SocketId, msg: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().send(sock, msg)
+    fn send(self: Arc<Self>, sock: SocketHandle, msg: &[u8]) -> std::io::Result<usize> {
+        let r = self.0.borrow_mut().send(sock, msg);
+        self.add_smoltcp_poll_event();
+        r
     }
     
-    fn set_recv_callback(&self, sock: SocketHandle, cb: impl FnMut() + 'static) {
-        self.0.borrow_mut().set_recv_callback(sock, cb)
+    fn set_recv_callback(self: Arc<Self>, sock: SocketHandle, cb: impl CallbackMut) {
+        self.0.borrow_mut().set_recv_callback(sock, cb);
     }
     
-    fn recv(&self, sock: Self::SocketId, msg: &mut [u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().recv(sock, msg)
+    fn recv(self: Arc<Self>, sock: SocketHandle, msg: &mut [u8]) -> std::io::Result<usize> {
+        let r = self.0.borrow_mut().recv(sock, msg);
+        self.add_smoltcp_poll_event();
+        r
     }
 
-    fn incoming_packet(&self, msg: Msg, time: Time) {
-        self
+    fn incoming_packet(self: Arc<Self>, msg: Msg) {
+        self.0.borrow_mut().incoming_packet(msg);
+        self.add_smoltcp_poll_event();
     }
 
-    fn outgoing_packets(&self, time: Time) -> VecDeque<Msg> {
-        
+    fn outgoing_packets(self: Arc<Self>) -> VecDeque<Msg> {
+        let r = self.0.borrow_mut().outgoing_packets();
+        self.add_smoltcp_poll_event();
+        r
     }
-}
-
-struct IncMachine<O: Os> {
-    os: O,
-
 }

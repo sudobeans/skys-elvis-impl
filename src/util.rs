@@ -1,5 +1,5 @@
 /// Represents a time (in seconds).
-pub type Time = u64;
+pub type Time = i64;
 
 /// Removes all values in the given vec, and puts them in the returned vec.
 pub fn take_all(v: &mut Vec<u8>) -> Vec<u8> {
@@ -106,3 +106,7 @@ impl TxToken for Channel {
         r
     }
 }
+
+pub trait Callback: FnOnce() + 'static + Send {}
+
+pub trait CallbackMut: FnMut() + 'static + Send {}

@@ -3,7 +3,6 @@ use std::{collections::BTreeSet, io::Write, time::Duration};
 use inc_machine::IncMachine;
 use util::{take_all, Channel, Machine, Time};
 
-mod inc_machine;
 mod tcp_machine;
 mod util;
 mod os_traits;
