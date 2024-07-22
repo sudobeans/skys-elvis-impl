@@ -25,7 +25,7 @@ use std::{cell::RefCell, rc::{Rc, Weak}};
 
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 
-use crate::Index;
+use crate::{simulator::Event, Index};
 
 pub type Ref<T> = &'static RefCell<T>;
 pub type Buf = Ref<Vec<u8>>;
@@ -107,6 +107,8 @@ impl TxToken for Channel {
     }
 }
 
-pub trait Callback: FnOnce() + 'static + Send {}
+pub trait Callback<T>: FnOnce(&mut T) -> Vec<Event<T>> + 'static + Send {}
 
-pub trait CallbackMut: FnMut() + 'static + Send {}
+pub type BoxCallback = Box<dyn FnOnce() + 'static + Send>;
+
+pub trait CallbackMut<T>: FnMut(&mut T) -> Vec<Event<T>> + 'static + Send {}
