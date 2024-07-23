@@ -2,11 +2,9 @@ use smoltcp::{
     iface::{Interface, SocketHandle, SocketSet}, phy::{Device, RxToken, TxToken}, socket::tcp, storage::RingBuffer, wire::{IpEndpoint, IpListenEndpoint}
 };
 
-use crate::{simulator::{Event, SIM}, util::{Callback, CallbackMut, Channel, Time}};
+use crate::{simulator::{CallbackEvent, SIM}, util::{Callback, CallbackMut, Channel, Time}};
 
 use std::{cell::RefCell, collections::{HashMap, VecDeque}, sync::Arc};
-
-type Msg = Vec<u8>;
 
 struct ElvOsDevice {
     incoming: VecDeque<Msg>,
