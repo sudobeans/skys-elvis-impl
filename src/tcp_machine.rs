@@ -2,7 +2,7 @@ use smoltcp::{
     iface::{Interface, SocketHandle, SocketSet}, phy::{Device, RxToken, TxToken}, socket::tcp, storage::RingBuffer, wire::{IpEndpoint, IpListenEndpoint}
 };
 
-use crate::{simulator::{CallbackEvent, SIM}, util::{Callback, CallbackMut, Channel, Time}};
+use crate::{simulator::{CallbackEvent, SIM}, util::{Callback, ReceiveCallback, Channel, Time}};
 
 use std::{cell::RefCell, collections::{HashMap, VecDeque}, sync::Arc};
 
@@ -101,7 +101,7 @@ impl ElvOsInner {
         sock.connect(self.interface.context(), remote_endpoint, local_endpoint).unwrap();
     }
 
-    fn set_connect_callback(&mut self, sock: SocketHandle, cb: impl CallbackMut) {
+    fn set_connect_callback(&mut self, sock: SocketHandle, cb: impl ReceiveCallback) {
         let sock_data = self.get_sock(sock).1;
         sock_data.connect = Box::new(cb);
     }
@@ -111,7 +111,7 @@ impl ElvOsInner {
         sock.listen(local_endpoint);
     }
     
-    fn set_listen_callback(&mut self, sock: SocketHandle, cb: impl CallbackMut) {
+    fn set_listen_callback(&mut self, sock: SocketHandle, cb: impl ReceiveCallback) {
         let sock_data = self.get_sock(sock).1;
         sock_data.listen = Box::new(cb);
     }
@@ -121,7 +121,7 @@ impl ElvOsInner {
         sock.send_slice(msg).or(Err(std::io::ErrorKind::NotConnected.into()))
     }
 
-    fn set_recv_callback(&mut self, sock: SocketHandle, cb: impl CallbackMut) {
+    fn set_recv_callback(&mut self, sock: SocketHandle, cb: impl ReceiveCallback) {
         let sock_data = self.get_sock(sock).1;
         sock_data.recv = Box::new(cb);
     }

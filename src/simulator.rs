@@ -2,21 +2,45 @@ use std::{borrow::BorrowMut, cell::RefCell, collections::{BTreeSet, BinaryHeap},
 
 use smoltcp::time::Instant;
 
-use crate::{util::{BoxCallback, Callback, Machine, Node, Time}, Index};
+use crate::{util::{BoxCallback, Callback, ReceiveCallback, Machine, Node, Time}, Index};
 
 pub type Msg = Vec<u8>;
 
 pub type Events<N> = Vec<Event<N>>;
 
 pub enum Event<N> {
+    /// Sets a callback to occur at the given time.
     Callback {
         time: Time,
         event: Box<dyn Callback<N>>,
     },
+    /// Sends a message to the node at the given index.
     Send {
         receiver: Index,
         message: Msg,
+    },
+    /// Sets the function that should be called when this machine receives a message.
+    SetRecv {
+        callback: Box<dyn ReceiveCallback<N>>,
     }
+}
+
+impl<N> Event<N> {
+    pub fn new_callback(time: Time, event: Box<dyn Callback<N>>) -> Event<N> {
+        Event::Callback {
+            time,
+            event,
+        }
+    }
+
+    pub fn new_send(receiver: Index, message: Msg) -> Event<N> {
+        Event::Send {
+            receiver,
+            message
+        }
+    }
+
+    pub fn set_recv()
 }
 
 /// An event is a function that gets called at a certain time on a node.
@@ -101,6 +125,7 @@ struct Simulator {
     nodes: Vec<Box<dyn NodeWithEventsTrait>>,
     /// The current time.
     time: Time,
+    /// The list of nodes that had something 
 }
 
 impl Simulator {
