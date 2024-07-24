@@ -25,7 +25,7 @@ use std::{cell::RefCell, rc::{Rc, Weak}};
 
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 
-use crate::{simulator::{CallbackEvent, Msg}, Index};
+use crate::{simulator::{Event, Msg}, Index};
 
 pub type Ref<T> = &'static RefCell<T>;
 pub type Buf = Ref<Vec<u8>>;
@@ -106,17 +106,3 @@ impl TxToken for Channel {
         r
     }
 }
-
-pub trait Callback<T>: FnOnce(&mut T) -> Vec<CallbackEvent<T>> + 'static + Send {}
-
-pub type BoxCallback = Box<dyn FnOnce() + 'static + Send>;
-
-/// A receive callback for a node.
-/// This callback receives a reference to the node, the time, the message received, and the index
-/// of the node the message was received from.
-pub trait ReceiveCallback<T>: FnMut(&mut T, Time, Msg, Index) -> Vec<CallbackEvent<T>> + 'static + Send {}
-
-/// Any type that can be stored in a mutex is a node.
-pub trait Node: 'static + Send + Sync {}
-
-impl<T: 'static + Send + Sync> Node for T {}

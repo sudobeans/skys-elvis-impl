@@ -2,7 +2,7 @@ use smoltcp::{
     iface::{Interface, SocketHandle, SocketSet}, phy::{Device, RxToken, TxToken}, socket::tcp, storage::RingBuffer, wire::{IpEndpoint, IpListenEndpoint}
 };
 
-use crate::{simulator::{CallbackEvent, SIM}, util::{Callback, ReceiveCallback, Channel, Time}};
+use crate::{simulator::{Event, SIM}, util::{Callback, ReceiveCallback, Channel, Time}};
 
 use std::{cell::RefCell, collections::{HashMap, VecDeque}, sync::Arc};
 

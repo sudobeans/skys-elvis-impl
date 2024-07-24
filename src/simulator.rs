@@ -8,159 +8,120 @@ pub type Msg = Vec<u8>;
 
 pub type Events<N> = Vec<Event<N>>;
 
-pub enum Event<N> {
-    /// Sets a callback to occur at the given time.
-    Callback {
-        time: Time,
-        event: Box<dyn Callback<N>>,
-    },
-    /// Sends a message to the node at the given index.
-    Send {
-        receiver: Index,
-        message: Msg,
-    },
-    /// Sets the function that should be called when this machine receives a message.
-    SetRecv {
-        callback: Box<dyn ReceiveCallback<N>>,
+/// A node is a thing in a simulation that is separated from other nodes.
+/// It could represent a machine on a network, or anything at all.
+/// 
+/// Using this trait can be a little awkward, since it requires your
+/// entire node to be a state machine. For ease of use, consider using the
+/// [`SchedulerNode`] trait.
+pub trait Node {
+    /// Tells the node the current time, so it can act accordingly.
+    /// The node should return a vec of messages it wants to send out, along with
+    /// the indices of each node that will receive the message.
+    /// 
+    /// # Panics
+    /// 
+    /// Nodes are allowed to panic if the time passed in
+    /// is less than the last one passed to `poll` or `receive`.
+    /// (Basically, nodes can't go back in time.)
+    fn poll(&mut self, time: Time) -> Vec<(Index, Msg)>;
+
+    /// Returns the next time this machine should be polled.
+    fn poll_at(&self) -> Option<Time>;
+
+    /// Called when this node receives a message.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `time` - the time that the node receives the message.
+    /// 
+    /// * `sender` - the index of the node that sent the message.
+    /// 
+    /// * `message` - the message this node is receiving.
+    /// 
+    /// # Panics
+    /// 
+    /// Nodes are allowed to panic if the time passed in
+    /// is less than the last one passed to `poll` or `receive`.
+    /// (Basically, nodes can't go back in time.)
+    fn receive(&mut self, time: Time, sender: Index, message: Msg);
+}
+
+/// A node that has a scheduler.
+/// Instead of working directly with `poll` and `poll_at`, you can use
+/// the [`Scheduler`] struct to schedule events.
+pub trait SchedulerNode {
+    /// Returns a reference to the scheduler stored in this node.
+    fn scheduler(&mut self) -> &mut Scheduler<Self>;
+
+    /// See [`Node::receive`].
+    fn receive(&mut self, time: Time, sender: Index, message: Msg);
+}
+
+impl<N: SchedulerNode> Node for N {
+
+} 
+
+/// A scheduler used to schedule events for a node `N`.
+pub struct Scheduler<N: ?Sized> {
+    events: BinaryHeap<Event<N>>,
+}
+
+impl<N> Scheduler<N> {
+    /// Add an event to this scheduler.
+    /// An event is just a callback that is called at a certain time.
+    fn add_event(&mut self, time: Time, cb: Callback<N>);
+
+    /// Give the scheduler the current time.
+    /// It will run all events that occurred before that time.
+    fn poll(&mut self, time: Time)
+}
+
+/// A callback on a node that returns the messages it is sending out
+/// as a response.
+pub trait Callback<N> {
+    /// Call the callback on the given node.
+    fn call(self, node: &mut N) -> Vec<(Index, Msg)>;
+}
+
+impl<F, N> Callback<N> for F where F: FnOnce(&mut N) -> Vec<(Index, Msg)> {
+    fn call(self, node: &mut N) -> Vec<(Index, Msg)> {
+        (self)(node)
     }
 }
+
+/// An event is just a time bundled with a callback that should be called at that time.
+pub struct Event<N: ?Sized>(Time, Box<dyn Callback<N>>);
 
 impl<N> Event<N> {
-    pub fn new_callback(time: Time, event: Box<dyn Callback<N>>) -> Event<N> {
-        Event::Callback {
-            time,
-            event,
-        }
-    }
-
-    pub fn new_send(receiver: Index, message: Msg) -> Event<N> {
-        Event::Send {
-            receiver,
-            message
-        }
-    }
-
-    pub fn set_recv()
-}
-
-/// An event is a function that gets called at a certain time on a node.
-pub struct CallbackEvent<N> {
-    pub time: Time,
-    pub event: Box<dyn Callback<N>>,
-}
-
-/// Internal struct used by the Simulator.
-struct ErasedEvent {
-    pub time: Time,
-    // forgive this type.
-    // like an Event returns more events, an ErasedEvent returns ErasedEvents
-    pub event: Box<dyn FnOnce() -> Vec<ErasedEvent> + 'static + Send>,
-}
-
-/// A node with its event queue.
-struct NodeWithEvents<N> {
-    node: N,
-    events: BinaryHeap<CallbackEvent<N>>,
-}
-
-/// Trait so we can remove the generic from NodeWithevents
-trait NodeWithEventsTrait {
-    fn next_event_time(&mut self) -> Option<Time>;
-
-    fn run_event(&mut self);
-}
-
-impl<N: Node> NodeWithEventsTrait for NodeWithEvents<N> {
-    fn next_event_time(&mut self) -> Option<Time> {
-        self.events.peek().map(|event| event.time)
-    }
-    
-    fn run_event(&mut self) {
-        if let Some(event) = self.events.pop() {
-            let evs = (event.event)(&mut self.node);
-            self.events.extend(evs);
-        }
+    /// Creates a new event from a time and a callback.
+    pub fn new(time: Time, cb: impl Callback<N>) -> Event<N> {
+        Event(time, Box::new(cb))
     }
 }
 
-
-impl<N> PartialEq for CallbackEvent<N> {
+impl<N> PartialEq for Event<N> {
     fn eq(&self, other: &Self) -> bool {
-        self.time.eq(&other.time)
+        self.0.eq(&other.0)
     }
 }
 
-impl<N> Eq for CallbackEvent<N> {}
+impl<N> Eq for Event<N> {}
 
-impl<N> PartialOrd for CallbackEvent<N> {
+impl<N> PartialOrd for Event<N> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.time.partial_cmp(&other.time)
+        self.0.partial_cmp(&other.0)
     }
 }
 
-impl<N> Ord for CallbackEvent<N> {
+impl<N> Ord for Event<N> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.time.cmp(&other.time)
+        self.0.cmp(&other.0)
     }
 }
 
-impl<N> std::fmt::Debug for CallbackEvent<N> {
+impl<N> std::fmt::Debug for Event<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Event").field("time", &self.time).field("desc", &self.desc).finish()
-    }
-}
-
-impl<N> CallbackEvent<N> {
-    /// Creates an event from the given time and callback.
-    pub fn new(time: Time, cb: impl Callback<N>) -> CallbackEvent<N> {
-        CallbackEvent {
-            time,
-            event: Box::new(cb),
-        }
-    }
-}
-
-struct Simulator {
-    /// Nodes.
-    nodes: Vec<Box<dyn NodeWithEventsTrait>>,
-    /// The current time.
-    time: Time,
-    /// The list of nodes that had something 
-}
-
-impl Simulator {
-    pub fn new() -> Simulator {
-        Simulator {
-            events: BinaryHeap::new(),
-            time: 0,
-        }
-    }
-
-    /// Runs the next event in the simulator.
-    /// Only one event will run at a time.
-    pub fn next_event(&mut self) {
-        if let Some(event) = self.events.pop() {
-            self.time = event.time;
-            let eraseds = (event.event)();
-            self.events.extend(eraseds);
-        }
-    }
-    
-    /// Adds a node to the simulator with an initial event.
-    pub fn add_node<N: Node>(&mut self, node: N, event: CallbackEvent<N>) {
-        assert!(self.get_time() <= event.time, "event should not be scheduled for the past");
-        let erased = ErasedEvent::new()
-        self.events.lock().unwrap().push(event);
-    }
-
-    /// Gets the current time of the sim.
-    pub fn get_time(&self) -> Time {
-        *self.time.read().unwrap()
-    }
-
-    /// Gets the current time of the sim as a smoltcp instant.
-    /// (In real ELVIS this would probably not be public.)
-    pub fn get_instant(&self) -> Instant {
-        Instant::from_millis(self.get_time())
+        f.debug_struct("Event").field("time", &self.0).field("desc", &self.0).finish()
     }
 }
