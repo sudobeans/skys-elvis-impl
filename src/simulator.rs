@@ -1,127 +1,108 @@
-use std::{borrow::BorrowMut, cell::RefCell, collections::{BTreeSet, BinaryHeap}, sync::{Arc, Mutex, RwLock}};
-
-use smoltcp::time::Instant;
-
-use crate::{util::{BoxCallback, Callback, ReceiveCallback, Machine, Node, Time}, Index};
-
 pub type Msg = Vec<u8>;
 
-pub type Events<N> = Vec<Event<N>>;
+pub type Index = usize;
+
+pub type Time = i64;
+
+pub type PollResult = Vec<(Index, Msg)>;
 
 /// A node is a thing in a simulation that is separated from other nodes.
 /// It could represent a machine on a network, or anything at all.
-/// 
+///
 /// Using this trait can be a little awkward, since it requires your
 /// entire node to be a state machine. For ease of use, consider using the
 /// [`SchedulerNode`] trait.
 pub trait Node {
-    /// Tells the node the current time, so it can act accordingly.
-    /// The node should return a vec of messages it wants to send out, along with
+    /// Tells the node the current time, and messages it has received,
+    /// so it can act accordingly.
+
+    ///
+    /// # Parameters
+    ///
+    /// * `time` - the time that the node is being polled
+    ///
+    /// * `incoming` - the incoming messages. Each pair contains the
+    /// index of the machine that sent it, and the message itself.
+    /// May be empty.
+    ///
+    /// # Returns
+    /// The node returns a vec of messages it wants to send out, along with
     /// the indices of each node that will receive the message.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Nodes are allowed to panic if the time passed in
     /// is less than the last one passed to `poll` or `receive`.
     /// (Basically, nodes can't go back in time.)
-    fn poll(&mut self, time: Time) -> Vec<(Index, Msg)>;
+    fn poll(&mut self, time: Time, incoming: PollResult) -> PollResult;
 
     /// Returns the next time this machine should be polled.
-    fn poll_at(&self) -> Option<Time>;
-
-    /// Called when this node receives a message.
-    /// 
-    /// # Parameters
-    /// 
-    /// * `time` - the time that the node receives the message.
-    /// 
-    /// * `sender` - the index of the node that sent the message.
-    /// 
-    /// * `message` - the message this node is receiving.
-    /// 
-    /// # Panics
-    /// 
-    /// Nodes are allowed to panic if the time passed in
-    /// is less than the last one passed to `poll` or `receive`.
-    /// (Basically, nodes can't go back in time.)
-    fn receive(&mut self, time: Time, sender: Index, message: Msg);
+    fn poll_at(&mut self) -> Option<Time>;
 }
 
-/// A node that has a scheduler.
-/// Instead of working directly with `poll` and `poll_at`, you can use
-/// the [`Scheduler`] struct to schedule events.
-pub trait SchedulerNode {
-    /// Returns a reference to the scheduler stored in this node.
-    fn scheduler(&mut self) -> &mut Scheduler<Self>;
+/// Runs a simulation of the machines until the given time has passed.
+pub fn run_sim_until(nodes: &mut [&mut dyn Node], end_time: Time) {
+    // The current time.
+    let mut time = match earliest_poll_time(nodes) {
+        Some((_index, time)) => time,
+        None => return,
+    };
 
-    /// See [`Node::receive`].
-    fn receive(&mut self, time: Time, sender: Index, message: Msg);
-}
+    // the messages each machine needs to receive
+    let mut mailboxes: Vec<PollResult> = vec![PollResult::new(); nodes.len()];
 
-impl<N: SchedulerNode> Node for N {
-
-} 
-
-/// A scheduler used to schedule events for a node `N`.
-pub struct Scheduler<N: ?Sized> {
-    events: BinaryHeap<Event<N>>,
-}
-
-impl<N> Scheduler<N> {
-    /// Add an event to this scheduler.
-    /// An event is just a callback that is called at a certain time.
-    fn add_event(&mut self, time: Time, cb: Callback<N>);
-
-    /// Give the scheduler the current time.
-    /// It will run all events that occurred before that time.
-    fn poll(&mut self, time: Time)
-}
-
-/// A callback on a node that returns the messages it is sending out
-/// as a response.
-pub trait Callback<N> {
-    /// Call the callback on the given node.
-    fn call(self, node: &mut N) -> Vec<(Index, Msg)>;
-}
-
-impl<F, N> Callback<N> for F where F: FnOnce(&mut N) -> Vec<(Index, Msg)> {
-    fn call(self, node: &mut N) -> Vec<(Index, Msg)> {
-        (self)(node)
+    while let Some((i, t)) = machine_to_poll(nodes, &mailboxes, time) {
+        time = t;
+        let outgoing = nodes[i].poll(time, take_all(&mut mailboxes[i]));
+        // deliver messages to mailboxes
+        for (destination, msg) in outgoing {
+            mailboxes[destination].push((i, msg));
+        }
     }
 }
 
-/// An event is just a time bundled with a callback that should be called at that time.
-pub struct Event<N: ?Sized>(Time, Box<dyn Callback<N>>);
-
-impl<N> Event<N> {
-    /// Creates a new event from a time and a callback.
-    pub fn new(time: Time, cb: impl Callback<N>) -> Event<N> {
-        Event(time, Box::new(cb))
+fn machine_to_poll(
+    nodes: &mut [&mut dyn Node],
+    mailboxes: &Vec<PollResult>,
+    current_time: Time,
+) -> Option<(Index, Time)> {
+    // if a machine has messages in its mailbox, it should be polled first
+    for i in 0..mailboxes.len() {
+        if !mailboxes[i].is_empty() {
+            return Some((i, current_time));
+        }
     }
+
+    earliest_poll_time(nodes)
 }
 
-impl<N> PartialEq for Event<N> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
+/// Goes through the nodes and returns the index of the
+/// one with the earilest poll time.
+pub fn earliest_poll_time(nodes: &mut [&mut dyn Node]) -> Option<(Index, Time)> {
+    let mut earliest: Option<(Index, Time)> = None;
+    for i in 0..nodes.len() {
+        let i_poll_at = nodes[i].poll_at();
+        match (i_poll_at, earliest) {
+            // both the earliest machine and the current machine
+            // have a set poll time
+            (Some(i_time), Some((_index, early_time))) => {
+                if i_time < early_time {
+                    earliest = Some((i, i_time));
+                }
+            }
+            // the earliest time is not yet set
+            (Some(i_time), None) => {
+                earliest = Some((i, i_time));
+            }
+            _ => (),
+        }
     }
+    earliest
 }
 
-impl<N> Eq for Event<N> {}
-
-impl<N> PartialOrd for Event<N> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl<N> Ord for Event<N> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl<N> std::fmt::Debug for Event<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Event").field("time", &self.0).field("desc", &self.0).finish()
-    }
+/// Removes all values in v, and puts them in the result.
+fn take_all(v: &mut PollResult) -> PollResult {
+    let mut result = Vec::new();
+    std::mem::swap(&mut result, v);
+    result
 }
