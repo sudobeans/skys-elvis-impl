@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::simulator::{Index, Msg, Node, PollResult, Time};
+use crate::simulator::{IncomingMsgs, Index, Msg, Node, OutgoingMsgs, Time};
 
 /// Represents an outgoing message.s
 /// Ordered so that the earliest events come first in Rust's BinaryHeap.
@@ -26,7 +26,7 @@ impl Wire {
 }
 
 impl Node for Wire {
-    fn poll(&mut self, time: Time, incoming: PollResult) -> PollResult {
+    fn poll(&mut self, time: Time, incoming: IncomingMsgs) -> OutgoingMsgs {
         for (sender, message) in incoming {
             let dest = if sender == self.end1 {
                 self.end2

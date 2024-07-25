@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     log,
-    simulator::{Index, Msg, Node, PollResult, Time},
+    simulator::{IncomingMsgs, Index, Msg, Node, OutgoingMsgs, Time},
 };
 
 #[derive(Default)]
@@ -248,7 +248,7 @@ fn receive_all(sock: &mut tcp::Socket<'static>) -> Msg {
 }
 
 impl Node for ElvOs {
-    fn poll(&mut self, time: Time, incoming: PollResult) -> PollResult {
+    fn poll(&mut self, time: Time, incoming: IncomingMsgs) -> OutgoingMsgs {
         use smoltcp::socket::tcp::State::*;
 
         self.time = time;

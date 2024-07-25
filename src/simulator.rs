@@ -9,7 +9,10 @@ pub type Index = usize;
 
 pub type Time = i64;
 
-pub type PollResult = Vec<(Index, Msg)>;
+// Messages paired with their destinations.
+pub type OutgoingMsgs = Vec<(Index, Msg)>;
+// Messages paired with the index of the incoming protocol.
+pub type IncomingMsgs = Vec<(Index, Msg)>;
 
 /// A node is a thing in a simulation that is separated from other nodes.
 /// It could represent a machine on a network, or anything at all.
@@ -38,7 +41,7 @@ pub trait Node {
     /// Nodes are allowed to panic if the time passed in
     /// is less than the last one passed to `poll` or `receive`.
     /// (Basically, nodes can't go back in time.)
-    fn poll(&mut self, time: Time, incoming: PollResult) -> PollResult;
+    fn poll(&mut self, time: Time, incoming: IncomingMsgs) -> OutgoingMsgs;
 
     /// Returns the next time this machine should be polled.
     fn poll_at(&mut self) -> Option<Time>;
@@ -53,7 +56,7 @@ pub fn run_sim_until(nodes: &mut [&mut dyn Node], end_time: Time) {
     };
 
     // the messages each machine needs to receive
-    let mut mailboxes: Vec<PollResult> = vec![PollResult::new(); nodes.len()];
+    let mut mailboxes: Vec<IncomingMsgs> = vec![IncomingMsgs::new(); nodes.len()];
 
     while let Some((i, t)) = machine_to_poll(nodes, &mailboxes, time) {
         time = t;
@@ -78,7 +81,7 @@ pub fn run_sim_until(nodes: &mut [&mut dyn Node], end_time: Time) {
 
 fn machine_to_poll(
     nodes: &mut [&mut dyn Node],
-    mailboxes: &[PollResult],
+    mailboxes: &[IncomingMsgs],
     current_time: Time,
 ) -> Option<(Index, Time)> {
     for node in nodes.iter_mut() {
@@ -128,7 +131,7 @@ pub fn earliest_poll_time(nodes: &mut [&mut dyn Node]) -> Option<(Index, Time)> 
 }
 
 /// Removes all values in v, and puts them in the result.
-fn take_all(v: &mut PollResult) -> PollResult {
+fn take_all(v: &mut IncomingMsgs) -> IncomingMsgs {
     let mut result = Vec::new();
     std::mem::swap(&mut result, v);
     result
