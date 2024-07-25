@@ -53,6 +53,7 @@ fn main() {
         node1.set_local_addrs(IpCidr::new(END1.addr, 24));
         let sock = node1.socket();
         node1.set_recv_callback(sock, ping_pong_callback);
+        node1.listen(sock, END1);
     }
 
     run_sim_until(&mut [&mut node0, &mut node1, &mut wire], end_time);

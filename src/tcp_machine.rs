@@ -4,7 +4,10 @@ use smoltcp::{
     socket::{tcp, AnySocket},
     storage::RingBuffer,
     time::Instant,
-    wire::{EthernetAddress, HardwareAddress, IpCidr, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv4Cidr},
+    wire::{
+        EthernetAddress, HardwareAddress, IpCidr, IpEndpoint, IpListenEndpoint, Ipv4Address,
+        Ipv4Cidr,
+    },
 };
 
 use std::{
@@ -241,7 +244,7 @@ fn downcast<'a>(sock: &'a mut smoltcp::socket::Socket<'static>) -> &'a mut tcp::
 
 /// Receives all data from a smoltcp socket buffer and puts it in a msg.
 fn receive_all(sock: &mut tcp::Socket<'static>) -> Msg {
-    let mut result = vec![0; sock.recv_capacity()];
+    let mut result = vec![0; sock.recv_queue()];
     let mut start = 0;
     loop {
         // stop when there's an error or no more data is received
@@ -327,8 +330,10 @@ impl Node for ElvOs {
             .interface
             .poll_at(Instant::from_micros(self.time), &self.sockets);
         let smoltcp_poll_time = smoltcp_poll_time.map(|time| time.total_micros());
+        // TODO: make github pull request to document weird smoltcp poll_at behavior
+        let smoltcp_poll_time = smoltcp_poll_time.map(|t| Time::max(self.time, t));
         let events_poll_time = self.events.peek().map(|event| event.0);
-        log!("smoltcp poll time: {smoltcp_poll_time:?} events poll time: {events_poll_time:?}");
+        log!("current time: {}, smoltcp poll time: {smoltcp_poll_time:?} events poll time: {events_poll_time:?}", self.time);
 
         // choose earliest of 2 times
         match (smoltcp_poll_time, events_poll_time) {

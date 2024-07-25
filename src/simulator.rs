@@ -20,7 +20,6 @@ pub type PollResult = Vec<(Index, Msg)>;
 pub trait Node {
     /// Tells the node the current time, and messages it has received,
     /// so it can act accordingly.
-
     ///
     /// # Parameters
     ///
@@ -85,6 +84,15 @@ fn machine_to_poll(
     mailboxes: &Vec<PollResult>,
     current_time: Time,
 ) -> Option<(Index, Time)> {
+    for node in nodes.iter_mut() {
+        if let Some(time) = node.poll_at() {
+            assert!(
+                time >= current_time,
+                "machines should not be polled in the past"
+            );
+        }
+    }
+
     // if a machine has messages in its mailbox, it should be polled first
     for i in 0..mailboxes.len() {
         if !mailboxes[i].is_empty() {
@@ -144,8 +152,6 @@ fn packet_to_str(packet: &[u8]) -> Result<String, smoltcp::wire::Error> {
             let payload = str::from_utf8(tcp.payload());
             writeln!(result, "\tPayload: {payload:?}");
         }
-        
-        
     }
 
     Ok(result)
