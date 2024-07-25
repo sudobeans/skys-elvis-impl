@@ -4,7 +4,7 @@ use smoltcp::{
     socket::{tcp, AnySocket},
     storage::RingBuffer,
     time::Instant,
-    wire::{EthernetAddress, HardwareAddress, IpEndpoint, IpListenEndpoint},
+    wire::{EthernetAddress, HardwareAddress, IpCidr, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv4Cidr},
 };
 
 use std::{
@@ -12,7 +12,10 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
 };
 
-use crate::simulator::{Index, Msg, Node, PollResult, Time};
+use crate::{
+    log,
+    simulator::{Index, Msg, Node, PollResult, Time},
+};
 
 #[derive(Default)]
 struct ElvOsDevice {
@@ -126,6 +129,12 @@ impl ElvOs {
         }
     }
 
+    /// Schedule an event to occur on this ElvOs.
+    pub fn add_event(&mut self, time: Time, event: impl FnOnce(&mut ElvOs) + 'static) {
+        assert!(time >= self.time);
+        self.events.push(Event(time, Box::new(event)))
+    }
+
     /// Returns a Socket and its associated SocketData.
     /// Panics if the handle is invalid.
     fn get_sock(&mut self, sock: SocketHandle) -> (&mut tcp::Socket<'static>, &mut SocketData) {
@@ -138,18 +147,21 @@ impl ElvOs {
         (socket, socket_data)
     }
 
-    fn socket(&mut self) -> SocketHandle {
-        let snd = RingBuffer::new(Vec::with_capacity(1500));
-        let rcv = RingBuffer::new(Vec::with_capacity(1500));
-        self.sockets.add(tcp::Socket::new(rcv, snd))
+    pub fn socket(&mut self) -> SocketHandle {
+        let snd = RingBuffer::new(vec![0; 1500]);
+        let rcv = RingBuffer::new(vec![0; 1500]);
+        let handle = self.sockets.add(tcp::Socket::new(rcv, snd));
+        self.socket_data.insert(handle, SocketData::default());
+        handle
     }
 
-    fn connect(
+    pub fn connect(
         &mut self,
         sock: SocketHandle,
         local_endpoint: impl Into<IpListenEndpoint>,
         remote_endpoint: impl Into<IpEndpoint>,
     ) {
+        self.assert_local_set();
         let sock = self.sockets.get_mut::<tcp::Socket>(sock);
         sock.connect(self.interface.context(), remote_endpoint, local_endpoint)
             .unwrap();
@@ -158,28 +170,38 @@ impl ElvOs {
     /// Called when a connection is created between this sock and another.
     /// This could be from either a [`listen`](ElvOs::listen)
     /// or [`connect`](ElvOs::connect) call.
-    fn set_connect_callback(&mut self, sock: SocketHandle, cb: fn(&mut ElvOs)) {
+    pub fn set_connect_callback(&mut self, sock: SocketHandle, cb: fn(&mut ElvOs, SocketHandle)) {
         let sock_data = self.get_sock(sock).1;
         sock_data.connect = cb;
     }
 
-    fn listen(&mut self, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>) {
+    pub fn listen(&mut self, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>) {
+        self.assert_local_set();
         let sock = self.get_sock(sock).0;
         sock.listen(local_endpoint);
     }
 
-    fn send(&mut self, sock: SocketHandle, msg: &[u8]) -> std::io::Result<usize> {
+    pub fn send(&mut self, sock: SocketHandle, msg: &[u8]) -> std::io::Result<usize> {
+        use std::io::Error;
+        use std::io::ErrorKind;
         let sock = self.get_sock(sock).0;
-        sock.send_slice(msg)
-            .or(Err(std::io::ErrorKind::NotConnected.into()))
+        let mut sent = sock
+            .send_slice(msg)
+            .or(Err(Error::from(ErrorKind::NotConnected)))?;
+        if sent < msg.len() {
+            sent += sock
+                .send_slice(&msg[sent..])
+                .or(Err(Error::from(ErrorKind::NotConnected)))?
+        }
+        Ok(sent)
     }
 
-    fn set_recv_callback(&mut self, sock: SocketHandle, cb: fn(&mut ElvOs)) {
+    pub fn set_recv_callback(&mut self, sock: SocketHandle, cb: fn(&mut ElvOs, SocketHandle)) {
         let sock_data = self.get_sock(sock).1;
         sock_data.recv = cb;
     }
 
-    fn recv(&mut self, sock: SocketHandle) -> Msg {
+    pub fn recv(&mut self, sock: SocketHandle) -> Msg {
         let sock = self.get_sock(sock).0;
         receive_all(sock)
     }
@@ -189,6 +211,26 @@ impl ElvOs {
         self.sockets.iter_mut().map(|(_handle, sock)| {
             tcp::Socket::downcast_mut(sock).expect("should only be storing tcp sockets")
         })
+    }
+
+    /// Sets the local IP addresses of this ElvOs.
+    pub fn set_local_addrs(&mut self, addr: IpCidr) {
+        self.interface.update_ip_addrs(|addrs| {
+            assert!(addrs.is_empty(), "only one IP address can be set");
+            addrs.push(addr).expect("addrs should be empty");
+        })
+    }
+
+    /// Asserts that a local address is set.
+    fn assert_local_set(&self) {
+        assert!(
+            !self.interface.ip_addrs().is_empty(),
+            "Ip address should be set before connecting sockets"
+        );
+    }
+
+    pub fn receiver(&self) -> Index {
+        self.receiver
     }
 }
 
@@ -242,6 +284,13 @@ impl Node for ElvOs {
             &mut self.sockets,
         );
 
+        //log!("{:#?}", self.sockets);
+        if !self.device.outgoing.is_empty() || !self.device.incoming.is_empty() {
+            log!("device queues not empty");
+        } else {
+            log!("queues empty");
+        }
+
         // make connect and receive callbacks
         let handles = Vec::from_iter(self.sockets.iter().map(|(handle, _sock)| handle));
         for handle in handles {
@@ -249,18 +298,18 @@ impl Node for ElvOs {
             let data = *data;
             let can_recv = socket.can_recv();
 
-            if socket.is_open() && connecting_socks.contains(&handle) {
-                (data.connect)(self)
+            if socket.state() == Established && connecting_socks.contains(&handle) {
+                (data.connect)(self, handle)
             }
 
             if can_recv {
-                (data.recv)(self)
+                (data.recv)(self, handle)
             }
         }
 
         // run functions in scheduler
         while let Some(Event(event_time, _)) = self.events.peek() {
-            if *event_time < time {
+            if *event_time <= time {
                 let ev = self.events.pop().unwrap();
                 (ev.1)(self);
             } else {
@@ -276,9 +325,10 @@ impl Node for ElvOs {
     fn poll_at(&mut self) -> Option<Time> {
         let smoltcp_poll_time = self
             .interface
-            .poll_at(Instant::from_micros(self.time), &mut self.sockets);
+            .poll_at(Instant::from_micros(self.time), &self.sockets);
         let smoltcp_poll_time = smoltcp_poll_time.map(|time| time.total_micros());
         let events_poll_time = self.events.peek().map(|event| event.0);
+        log!("smoltcp poll time: {smoltcp_poll_time:?} events poll time: {events_poll_time:?}");
 
         // choose earliest of 2 times
         match (smoltcp_poll_time, events_poll_time) {
@@ -290,18 +340,18 @@ impl Node for ElvOs {
     }
 }
 
-type BoxCallback = fn(&mut ElvOs);
+type Callback = fn(&mut ElvOs, SocketHandle);
 
 #[derive(Clone, Copy)]
 struct SocketData {
     /// Callbacks, set by `set_connect_callback`, etc.
-    connect: BoxCallback,
-    recv: BoxCallback,
+    connect: Callback,
+    recv: Callback,
 }
 
 impl Default for SocketData {
     fn default() -> Self {
-        fn nothing(_: &mut ElvOs) {}
+        fn nothing(_: &mut ElvOs, _: SocketHandle) {}
         Self {
             connect: nothing,
             recv: nothing,
@@ -318,7 +368,7 @@ pub fn take_all(v: &mut Vec<Msg>) -> Vec<Msg> {
 
 /// An event is just a function and the time it gets called.
 /// Ordered so that the earliest events come first in Rust's BinaryHeap.
-struct Event(Time, fn(&mut ElvOs));
+struct Event(Time, Box<dyn FnOnce(&mut ElvOs)>);
 
 impl PartialEq for Event {
     fn eq(&self, other: &Self) -> bool {

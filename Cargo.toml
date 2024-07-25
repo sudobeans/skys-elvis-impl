@@ -6,5 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-smoltcp = "0.11.0"
-lazy_static = "1.5.0"
+smoltcp = { version = "0.11.0", features = ["verbose", "log"] }
+env_logger = "0.11.5"
+log = "= 0.4.22"
+
+[dev-dependencies]
+env_logger = "0.11.5"

@@ -1,3 +1,8 @@
+use core::str;
+use std::fmt::Write;
+
+use crate::log;
+
 pub type Msg = Vec<u8>;
 
 pub type Index = usize;
@@ -53,7 +58,21 @@ pub fn run_sim_until(nodes: &mut [&mut dyn Node], end_time: Time) {
 
     while let Some((i, t)) = machine_to_poll(nodes, &mailboxes, time) {
         time = t;
+        log!("{i} polled at {time}");
+        if time > end_time {
+            break;
+        }
+
         let outgoing = nodes[i].poll(time, take_all(&mut mailboxes[i]));
+
+        // prints out the packets sent
+        for (dest, msg) in &outgoing {
+            log!(
+                "packet from {i} to {dest}: {}",
+                packet_to_str(&msg).unwrap()
+            );
+        }
+
         // deliver messages to mailboxes
         for (destination, msg) in outgoing {
             mailboxes[destination].push((i, msg));
@@ -105,4 +124,29 @@ fn take_all(v: &mut PollResult) -> PollResult {
     let mut result = Vec::new();
     std::mem::swap(&mut result, v);
     result
+}
+
+/// Interprets a bunch of bytes as an ethernet-ip-tcp packet
+/// and prints them out
+fn packet_to_str(packet: &[u8]) -> Result<String, smoltcp::wire::Error> {
+    use smoltcp::wire::*;
+
+    let mut result = String::new();
+    let eth = EthernetFrame::new_checked(packet)?;
+    writeln!(result, "{eth}");
+    if eth.ethertype() == smoltcp::wire::EthernetProtocol::Ipv4 {
+        let ip = Ipv4Packet::new_checked(eth.payload())?;
+        writeln!(result, "\t{ip}");
+        if ip.next_header() == smoltcp::wire::IpProtocol::Tcp {
+            let tcp = TcpPacket::new_checked(ip.payload())?;
+            writeln!(result, "\t{tcp}");
+
+            let payload = str::from_utf8(tcp.payload());
+            writeln!(result, "\tPayload: {payload:?}");
+        }
+        
+        
+    }
+
+    Ok(result)
 }

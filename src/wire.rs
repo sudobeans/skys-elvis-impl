@@ -46,6 +46,8 @@ impl Node for Wire {
             if *out_time <= time {
                 let OutgoingMsg(_, dest, msg) = self.outgoing.pop_front().unwrap();
                 result.push((dest, msg));
+            } else {
+                break;
             }
         }
         result
