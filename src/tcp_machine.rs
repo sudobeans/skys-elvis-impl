@@ -12,10 +12,7 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
 };
 
-use crate::{
-    log,
-    simulator::{IncomingMsgs, Index, Msg, Node, OutgoingMsgs, Time},
-};
+use crate::simulator::{IncomingMsgs, Index, Msg, Node, OutgoingMsgs, Time};
 
 #[derive(Default)]
 struct ElvOsDevice {
@@ -277,13 +274,6 @@ impl Node for ElvOs {
             &mut self.sockets,
         );
 
-        //log!("{:#?}", self.sockets);
-        if !self.device.outgoing.is_empty() || !self.device.incoming.is_empty() {
-            log!("device queues not empty");
-        } else {
-            log!("queues empty");
-        }
-
         // make connect and receive callbacks
         let handles = Vec::from_iter(self.sockets.iter().map(|(handle, _sock)| handle));
         for handle in handles {
@@ -323,7 +313,6 @@ impl Node for ElvOs {
         // TODO: make github pull request to document weird smoltcp poll_at behavior
         let smoltcp_poll_time = smoltcp_poll_time.map(|t| Time::max(self.time, t));
         let events_poll_time = self.events.peek().map(|event| event.0);
-        log!("current time: {}, smoltcp poll time: {smoltcp_poll_time:?} events poll time: {events_poll_time:?}", self.time);
 
         // choose earliest of 2 times
         match (smoltcp_poll_time, events_poll_time) {
