@@ -4,10 +4,7 @@ use smoltcp::{
     socket::{tcp, AnySocket},
     storage::RingBuffer,
     time::Instant,
-    wire::{
-        EthernetAddress, HardwareAddress, IpCidr, IpEndpoint, IpListenEndpoint, Ipv4Address,
-        Ipv4Cidr,
-    },
+    wire::{EthernetAddress, HardwareAddress, IpCidr, IpEndpoint, IpListenEndpoint},
 };
 
 use std::{
@@ -181,7 +178,7 @@ impl ElvOs {
     pub fn listen(&mut self, sock: SocketHandle, local_endpoint: impl Into<IpListenEndpoint>) {
         self.assert_local_set();
         let sock = self.get_sock(sock).0;
-        sock.listen(local_endpoint);
+        sock.listen(local_endpoint).unwrap();
     }
 
     pub fn send(&mut self, sock: SocketHandle, msg: &[u8]) -> std::io::Result<usize> {
@@ -207,13 +204,6 @@ impl ElvOs {
     pub fn recv(&mut self, sock: SocketHandle) -> Msg {
         let sock = self.get_sock(sock).0;
         receive_all(sock)
-    }
-
-    /// Returns an iterator over the TCP sockets
-    fn socks(&mut self) -> impl Iterator<Item = &mut tcp::Socket<'static>> {
-        self.sockets.iter_mut().map(|(_handle, sock)| {
-            tcp::Socket::downcast_mut(sock).expect("should only be storing tcp sockets")
-        })
     }
 
     /// Sets the local IP addresses of this ElvOs.

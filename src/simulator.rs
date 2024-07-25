@@ -66,10 +66,7 @@ pub fn run_sim_until(nodes: &mut [&mut dyn Node], end_time: Time) {
 
         // prints out the packets sent
         for (dest, msg) in &outgoing {
-            log!(
-                "packet from {i} to {dest}: {}",
-                packet_to_str(&msg).unwrap()
-            );
+            log!("packet from {i} to {dest}: {}", packet_to_str(msg).unwrap());
         }
 
         // deliver messages to mailboxes
@@ -81,7 +78,7 @@ pub fn run_sim_until(nodes: &mut [&mut dyn Node], end_time: Time) {
 
 fn machine_to_poll(
     nodes: &mut [&mut dyn Node],
-    mailboxes: &Vec<PollResult>,
+    mailboxes: &[PollResult],
     current_time: Time,
 ) -> Option<(Index, Time)> {
     for node in nodes.iter_mut() {
@@ -94,6 +91,7 @@ fn machine_to_poll(
     }
 
     // if a machine has messages in its mailbox, it should be polled first
+    #[allow(clippy::needless_range_loop)]
     for i in 0..mailboxes.len() {
         if !mailboxes[i].is_empty() {
             return Some((i, current_time));
@@ -107,6 +105,8 @@ fn machine_to_poll(
 /// one with the earilest poll time.
 pub fn earliest_poll_time(nodes: &mut [&mut dyn Node]) -> Option<(Index, Time)> {
     let mut earliest: Option<(Index, Time)> = None;
+
+    #[allow(clippy::needless_range_loop)]
     for i in 0..nodes.len() {
         let i_poll_at = nodes[i].poll_at();
         match (i_poll_at, earliest) {
@@ -135,22 +135,22 @@ fn take_all(v: &mut PollResult) -> PollResult {
 }
 
 /// Interprets a bunch of bytes as an ethernet-ip-tcp packet
-/// and prints them out
+/// and turns them into a string
 fn packet_to_str(packet: &[u8]) -> Result<String, smoltcp::wire::Error> {
     use smoltcp::wire::*;
 
     let mut result = String::new();
     let eth = EthernetFrame::new_checked(packet)?;
-    writeln!(result, "{eth}");
+    let _ = writeln!(result, "{eth}");
     if eth.ethertype() == smoltcp::wire::EthernetProtocol::Ipv4 {
         let ip = Ipv4Packet::new_checked(eth.payload())?;
-        writeln!(result, "\t{ip}");
+        let _ = writeln!(result, "\t{ip}");
         if ip.next_header() == smoltcp::wire::IpProtocol::Tcp {
             let tcp = TcpPacket::new_checked(ip.payload())?;
-            writeln!(result, "\t{tcp}");
+            let _ = writeln!(result, "\t{tcp}");
 
             let payload = str::from_utf8(tcp.payload());
-            writeln!(result, "\tPayload: {payload:?}");
+            let _ = writeln!(result, "\tPayload: {payload:?}");
         }
     }
 

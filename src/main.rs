@@ -3,7 +3,7 @@ use core::str;
 use simulator::run_sim_until;
 use smoltcp::{
     iface::SocketHandle,
-    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr},
+    wire::{EthernetAddress, IpAddress, IpCidr, IpEndpoint, Ipv4Address},
 };
 use tcp_machine::ElvOs;
 use wire::Wire;
